@@ -5,6 +5,7 @@
 *.elf
 *.d
 *.crf
+Objects/
 
 # Precompiled Headers
 *.gch
