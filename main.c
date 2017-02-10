@@ -4,7 +4,7 @@
 #include "hwdrv.h"
 #include "st7735.h"
 
-#define NUM 10
+#define NUM 16
 #define FAILURES 3
 
 #define AUTO      ((0x51 << 8) | 0x52) /* the command is QR */
@@ -16,13 +16,26 @@
 #define OK          ((0x4F << 8) | 0x4B) /* the command is OK */
 
 /* Bit definition for status register */
-#define FORWARD_Status    0
+#define FORWARD_Status     0
 #define BACK_Status        1
 #define LEFT_Status        2
-#define RIGHT_Status    3
+#define RIGHT_Status       3
 #define MOVE_Status        4
 #define AUTO_Status        6
-#define CONNOK          7
+#define CONNOK             7
+
+/* Definition for new status register */
+#define Status_STOP         0b00000000 // 0x00
+#define Status_FORWARD      0b00000001 // 0x01
+#define Status_BACK         0b00000010 // 0x02   
+#define Status_LEFT         0b00000011 // 0x03  
+#define Status_RIGHT        0b00000100 // 0x04    
+#define Status_SLEFT        0b00000101 // 0x05    
+#define Status_SRIGHT       0b00000110 // 0x06  
+#define Status_SBLEFT       0b00000111 // 0x07    
+#define Status_SBRIGHT      0b00001000 // 0x08
+#define Status_OK           0b10000000 // 0x80
+#define Status_AUTO         0b01000000 // 0x40
 
 #define TEN(NUMBER) ((3 << 4) | NUMBER / 10)
 #define ONE(NUMBER) ((3 << 4) | NUMBER % 10)
@@ -37,7 +50,7 @@
 #define STARTMARKER        0x81
 #define STOPMARKER         0x8F
 
-#define TIMEOUT 5
+#define TIMEOUT 10
 
 #define LINE0(STR) (ST7735_PutStr5x7(5, 5, (STR), ST7735_Color565(0, 0xFF, 0), ST7735_Color565(0x0, 0x0, 0x0), 1))
 #define LINE1(STR) (ST7735_PutStr5x7(5, 15, (STR), ST7735_Color565(0, 0xFF, 0), ST7735_Color565(0x0, 0x0, 0x0), 1))
@@ -45,6 +58,8 @@
 #define LINE3(STR) (ST7735_PutStr5x7(5, 35, (STR), ST7735_Color565(0, 0xFF, 0), ST7735_Color565(0x0, 0x0, 0x0), 1))
 #define COL1LINE0(STR)  (ST7735_PutStr5x7(80, 5, (STR), ST7735_Color565(0, 0xFF, 0), ST7735_Color565(0x0, 0x0, 0x0), 1))
 #define COL2LINE0(STR)  (ST7735_PutStr5x7(115, 5, (STR), ST7735_Color565(0, 0xFF, 0), ST7735_Color565(0x0, 0x0, 0x0), 1))
+
+#define ARRAYSIZE 2*5
 
 __IO uint8_t status = (1 << CONNOK);
 __IO uint8_t count = 0;
@@ -59,6 +74,7 @@ __IO uint8_t j = 0;
 __IO uint8_t k = 0;
 __IO uint8_t p = 0;
 __IO uint16_t x, y;
+int16_t tmp_l, tmp_r;
 __IO uint8_t drvl = 0x40;
 __IO uint8_t drvr = 0x40;
 __IO uint8_t tmp_drvl = 0;
@@ -77,7 +93,7 @@ ADC_InitTypeDef ADC_InitStructure;
 DMA_InitTypeDef DMA_InitStructure;
 EXTI_InitTypeDef EXTI_InitStructure;
 
-uint16_t ADCBuffer[] = {0xAAAA, 0xAAAA};
+uint16_t ADCBuffer[ARRAYSIZE];
 
 void number2str(uint8_t byte, uint8_t *str)
 {
@@ -147,10 +163,10 @@ void DisplayStatus(uint8_t *response)
         tmp_drvl = response[1]; tmp_drvr = response[2];
         buffer[0] = 'L'; buffer[1] = '=';
         number2str(tmp_drvl, &buffer[2]);
-        COL1LINE0(&buffer[0]);
+        COL1LINE0((char*)&buffer[0]);
         buffer[0] = 'R';
         number2str(tmp_drvr, &buffer[2]);
-        COL2LINE0(&buffer[0]);
+        COL2LINE0((char*)&buffer[0]);
 
         //ST7735_FillRect(80, 20, 100, 60, ST7735_Color565(0x60, 0x10, 0x50));
         //ST7735_FillRect(115, 20, 135, 60, ST7735_Color565(0x60, 0x10, 0x50));
@@ -166,9 +182,9 @@ void TIM3_IRQHandler(void)
         TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
         //enable tim3 to one pulse
         //TIM_Cmd(TIM3,ENABLE);
-        y = ADCBuffer[0];
-        x = ADCBuffer[1];
-
+        y = (ADCBuffer[0] + ADCBuffer[2] + ADCBuffer[4] + ADCBuffer[6] + ADCBuffer[8]) / 5;
+        x = (ADCBuffer[1] + ADCBuffer[3] + ADCBuffer[5] + ADCBuffer[7] + ADCBuffer[9]) / 5;
+        
         count++;
 
         if (count > TIMEOUT)
@@ -194,26 +210,36 @@ void TIM3_IRQHandler(void)
         }
         else
         {
-            drvl = drvr = y * MAXPWM / MAXVAL;
+            
+            tmp_l = tmp_r = y;
+            
+            if (x >= MIDVAL)
+            {
+                tmp_l = y + (x - MIDVAL);
+                tmp_r = y - (x - MIDVAL);
+            }
+            else if (x < MIDVAL)
+            {
+                tmp_l = y - (MIDVAL - x);
+                tmp_r = y + (MIDVAL - x);
+            }
+            if (tmp_l > MAXVAL) tmp_l = MAXVAL;
+            if (tmp_r > MAXVAL) tmp_r = MAXVAL;
 
-            if ((x >= MIDVAL) && (x <= MAXVAL))
-            {
-                tmp = (x * MIDPWM / MIDVAL) - MIDPWM;
-                if ((drvl + tmp) > MAXPWM) drvl = MAXPWM; else drvl += tmp;
-                if ((drvr - tmp) < 0) drvr = 0; else drvr -= tmp;
-            }
-            else if ((x >= MINVAL) && (x < MIDVAL))
-            {
-                tmp = MAXPWM - ((x - MIDVAL) * (-1) * MIDPWM / MIDVAL);
-                if ((drvr + tmp) > MAXPWM) drvr = MAXPWM; else drvr += tmp;
-                if ((drvl - tmp) < 0) drvl = 0; else drvl -= tmp;
-            }
+            if (tmp_l < 0) tmp_l = 0;
+            if (tmp_r < 0) tmp_r = 0;
+            drvl = tmp_l * MAXPWM / MAXVAL;
+            drvr = tmp_r * MAXPWM / MAXVAL;
 
             cmd[0] = STARTMARKER;
             cmd[1] = 'M'; cmd[2] = 'V';
             cmd[3] = drvl; cmd[4] = drvr;
-            cmd[5] = STOPMARKER;
-            UARTSend(&cmd[0], 6);
+            cmd[5] = (uint8_t)(x & 0x00FF);
+            cmd[6] = (uint8_t)((x & 0xFF00) >> 8);
+            cmd[7] = (uint8_t)(y & 0x00FF);
+            cmd[8] = (uint8_t)((y & 0xFF00) >> 8);
+            cmd[9] = STOPMARKER;
+            UARTSend(&cmd[0], 10);
         }
     }
 }
@@ -322,7 +348,7 @@ void ADC1_Init(void)
 
     RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
 
-    DMA_InitStructure.DMA_BufferSize = 2;
+    DMA_InitStructure.DMA_BufferSize = ARRAYSIZE;
     DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralSRC;
     DMA_InitStructure.DMA_M2M = DMA_M2M_Disable;
     DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t)ADCBuffer;
