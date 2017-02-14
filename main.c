@@ -25,17 +25,17 @@
 #define CONNOK             7
 
 /* Definition for new status register */
-#define Status_STOP         0b00000000 // 0x00
-#define Status_FORWARD      0b00000001 // 0x01
-#define Status_BACK         0b00000010 // 0x02   
-#define Status_LEFT         0b00000011 // 0x03  
-#define Status_RIGHT        0b00000100 // 0x04    
-#define Status_SLEFT        0b00000101 // 0x05    
-#define Status_SRIGHT       0b00000110 // 0x06  
-#define Status_SBLEFT       0b00000111 // 0x07    
-#define Status_SBRIGHT      0b00001000 // 0x08
-#define Status_OK           0b10000000 // 0x80
-#define Status_AUTO         0b01000000 // 0x40
+#define Status_STOP         0x00 // 0b00000000
+#define Status_FORWARD      0x01 // 0b00000001 
+#define Status_BACK         0x02 // 0b00000010    
+#define Status_LEFT         0x03 // 0b00000011   
+#define Status_RIGHT        0x04 // 0b00000100     
+#define Status_SLEFT        0x05 // 0b00000101     
+#define Status_SRIGHT       0x06 // 0b00000110   
+#define Status_SBLEFT       0x07 // 0b00000111     
+#define Status_SBRIGHT      0x08 // 0b00001000 
+#define Status_OK           0x80 // 0b10000000 
+#define Status_AUTO         0x40 // 0b01000000 
 
 #define TEN(NUMBER) ((3 << 4) | NUMBER / 10)
 #define ONE(NUMBER) ((3 << 4) | NUMBER % 10)
@@ -59,7 +59,7 @@
 #define COL1LINE0(STR)  (ST7735_PutStr5x7(80, 5, (STR), ST7735_Color565(0, 0xFF, 0), ST7735_Color565(0x0, 0x0, 0x0), 1))
 #define COL2LINE0(STR)  (ST7735_PutStr5x7(115, 5, (STR), ST7735_Color565(0, 0xFF, 0), ST7735_Color565(0x0, 0x0, 0x0), 1))
 
-#define ARRAYSIZE 2*5
+#define ARRAYSIZE 3*5
 
 __IO uint8_t status = (1 << CONNOK);
 __IO uint8_t count = 0;
@@ -73,7 +73,7 @@ __IO uint8_t i = 0;
 __IO uint8_t j = 0;
 __IO uint8_t k = 0;
 __IO uint8_t p = 0;
-__IO uint16_t x, y;
+__IO uint16_t x, y, m;
 int16_t tmp_l, tmp_r;
 __IO uint8_t drvl = 0x40;
 __IO uint8_t drvr = 0x40;
@@ -182,8 +182,9 @@ void TIM3_IRQHandler(void)
         TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
         //enable tim3 to one pulse
         //TIM_Cmd(TIM3,ENABLE);
-        y = (ADCBuffer[0] + ADCBuffer[2] + ADCBuffer[4] + ADCBuffer[6] + ADCBuffer[8]) / 5;
-        x = (ADCBuffer[1] + ADCBuffer[3] + ADCBuffer[5] + ADCBuffer[7] + ADCBuffer[9]) / 5;
+        y = (ADCBuffer[0] + ADCBuffer[3] + ADCBuffer[6] + ADCBuffer[9] + ADCBuffer[12]) / 5;
+        x = (ADCBuffer[1] + ADCBuffer[4] + ADCBuffer[7] + ADCBuffer[10] + ADCBuffer[13]) / 5;
+        m = (ADCBuffer[2] + ADCBuffer[5] + ADCBuffer[8] + ADCBuffer[11] + ADCBuffer[14]) / 5;
         
         count++;
 
@@ -197,16 +198,23 @@ void TIM3_IRQHandler(void)
             status = 0; count = 0;
         }
 
-        if (status & (1 << AUTO_Status))
+        if (status & Status_AUTO)
         {
+            status |= Status_OK;
             cmd[0] = STARTMARKER;
-            cmd[3] = STOPMARKER;
-            cmd[1] = 'O'; cmd[2] = 'K';
-            UARTSend(&cmd[0], 4);
-            if (y > 3000) { cmd[1] = 'F'; cmd[2] = 'R'; UARTSend(&cmd[0], 4); }
-            else if (y < 1000) { cmd[1] = 'B'; cmd[2] = 'K'; UARTSend(&cmd[0], 4); }
-            else if (x > 3000) { cmd[1] = 'R'; cmd[2] = 'T'; UARTSend(&cmd[0], 4); }
-            else if (x < 1000) { cmd[1] = 'L'; cmd[2] = 'F'; UARTSend(&cmd[0], 4); }
+            //cmd[3] = STOPMARKER;
+            //cmd[1] = 'O'; cmd[2] = 'K';
+            if (y > 3000) { status &= 0xF0; status |= Status_FORWARD; }
+            else if (y < 1000) { status &= 0xF0; status |= Status_BACK; }
+            else if (x > 3000) { status &= 0xF0; status |= Status_RIGHT; }
+            else if (x < 1000) { status &= 0xF0; status |= Status_LEFT; }
+            cmd[1] = status;
+            cmd[2] = STOPMARKER;
+            UARTSend(&cmd[0], 3);
+            //if (y > 3000) { cmd[1] = 'F'; cmd[2] = 'R'; UARTSend(&cmd[0], 4); }
+            //else if (y < 1000) { cmd[1] = 'B'; cmd[2] = 'K'; UARTSend(&cmd[0], 4); }
+            //else if (x > 3000) { cmd[1] = 'R'; cmd[2] = 'T'; UARTSend(&cmd[0], 4); }
+            //else if (x < 1000) { cmd[1] = 'L'; cmd[2] = 'F'; UARTSend(&cmd[0], 4); }
         }
         else
         {
@@ -231,15 +239,21 @@ void TIM3_IRQHandler(void)
             drvl = tmp_l * MAXPWM / MAXVAL;
             drvr = tmp_r * MAXPWM / MAXVAL;
 
+            status &= 0xF0;
             cmd[0] = STARTMARKER;
-            cmd[1] = 'M'; cmd[2] = 'V';
-            cmd[3] = drvl; cmd[4] = drvr;
-            cmd[5] = (uint8_t)(x & 0x00FF);
-            cmd[6] = (uint8_t)((x & 0xFF00) >> 8);
-            cmd[7] = (uint8_t)(y & 0x00FF);
-            cmd[8] = (uint8_t)((y & 0xFF00) >> 8);
-            cmd[9] = STOPMARKER;
-            UARTSend(&cmd[0], 10);
+            cmd[1] = status;
+            //cmd[2] = STOPMARKER;
+            //cmd[1] = 'M'; cmd[2] = 'V';
+            cmd[2] = drvl;
+            cmd[3] = drvr;
+            cmd[4] = (uint8_t)(x & 0x00FF);
+            cmd[5] = (uint8_t)((x & 0xFF00) >> 8);
+            cmd[6] = (uint8_t)(y & 0x00FF);
+            cmd[7] = (uint8_t)((y & 0xFF00) >> 8);
+            cmd[8] = (uint8_t)(m & 0x00FF);
+            cmd[9] = (uint8_t)((m & 0xFF00) >> 8);
+            cmd[10] = STOPMARKER;
+            UARTSend(&cmd[0], 11);
         }
     }
 }
@@ -248,10 +262,16 @@ void EXTI4_IRQHandler(void)
 {
     if (EXTI_GetITStatus(EXTI_Line4) != RESET)
     {
+        if (status & Status_AUTO)
+            status &= ~(Status_AUTO);
+        else
+            status |= Status_AUTO;
         cmd[0] = STARTMARKER;
-        cmd[1] = 'Q'; cmd[2] = 'R';
-        cmd[3] = STOPMARKER;
-        UARTSend(&cmd[0], 4);
+        cmd[1] = status;
+        cmd[2] = STOPMARKER;
+        //cmd[1] = 'Q'; cmd[2] = 'R';
+        //cmd[3] = STOPMARKER;
+        UARTSend(&cmd[0], 3);
         delay_10ms(6000);
         //
         //Clear the EXTI line 9 pending bit
@@ -275,6 +295,7 @@ int main(void)
     ST7735_Init();
     ST7735_Orientation(1);
     ST7735_Clear(ST7735_Color565(0x0, 0x0, 0x0));
+    LINE0("Remote control");
 
     USART_NVIC_Configuration();
     USART_GPIO_Configuration();
@@ -343,7 +364,7 @@ void ADC1_Init(void)
     // input of ADC (it doesn't seem to be needed, as default GPIO state is floating input)
     GPIO_InitTypeDef GPIO_InitStructure;
     GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_AIN;
-    GPIO_InitStructure.GPIO_Pin   = GPIO_Pin_2 | GPIO_Pin_3;        // that's ADC1_IN2 and ADC1_IN3 (PA2, PA3 on STM32)
+    GPIO_InitStructure.GPIO_Pin   = GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_5;        // that's ADC12_IN2, ADC12_IN3 and ADC12_IN5 (PA2, PA3, PA5 on STM32)
     GPIO_Init(GPIOA, &GPIO_InitStructure);
 
     RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
@@ -373,10 +394,11 @@ void ADC1_Init(void)
     ADC_InitStructure.ADC_ContinuousConvMode = ENABLE;    // we work in continuous sampling mode
     ADC_InitStructure.ADC_ExternalTrigConv = ADC_ExternalTrigConv_None;
     ADC_InitStructure.ADC_DataAlign = ADC_DataAlign_Right;
-    ADC_InitStructure.ADC_NbrOfChannel = 2;
+    ADC_InitStructure.ADC_NbrOfChannel = 3;
 
     ADC_RegularChannelConfig(ADC1, ADC_Channel_2, 1, ADC_SampleTime_28Cycles5);
     ADC_RegularChannelConfig(ADC1, ADC_Channel_3, 2, ADC_SampleTime_28Cycles5);
+    ADC_RegularChannelConfig(ADC1, ADC_Channel_5, 3, ADC_SampleTime_28Cycles5);
     ADC_Init (ADC1, &ADC_InitStructure);
 
     // enable ADC
