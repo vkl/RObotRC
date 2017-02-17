@@ -33,9 +33,9 @@ void ST7735_Init(void) {
     SPI_InitTypeDef SPI;
     GPIO_InitTypeDef PORT;
 	
-	
-	RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI2, ENABLE);
-	RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOB, ENABLE);
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SPI1, ENABLE);
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
 
 	// Configure and enable SPI
 	SPI.SPI_Mode = SPI_Mode_Master;

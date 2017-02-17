@@ -1,10 +1,19 @@
+#ifndef _ST7735_H
+#define _ST7735_H
+
 #include "stm32f10x.h"
 
+/*
 #define SPI_PORT      SPI2
 #define SPI_SCK_PIN   GPIO_Pin_13     // PB13
 #define SPI_MOSI_PIN  GPIO_Pin_15     // PB15
 #define SPI_GPIO_PORT GPIOB
+*/
 
+#define SPI_PORT      SPI1
+#define SPI_SCK_PIN   GPIO_Pin_5     // PA5
+#define SPI_MOSI_PIN  GPIO_Pin_7     // PA7
+#define SPI_GPIO_PORT GPIOA
 
 // Screen resolution in normal orientation
 #define scr_w         128
@@ -69,3 +78,5 @@ void ST7735_PutStr5x7(uint8_t X, uint8_t Y, char *str, uint16_t color, uint16_t 
 uint16_t ST7735_Color565(uint8_t r, uint8_t g, uint8_t b);
 void ST7735_drawCircle(uint8_t x0, uint8_t y0, uint8_t r, uint16_t color);
 void ST7735_fillCircle(int poX, int poY, int r,unsigned int color);
+
+#endif

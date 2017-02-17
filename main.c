@@ -3,39 +3,10 @@
 #include "usart_rxtx.h"
 #include "hwdrv.h"
 #include "st7735.h"
+#include "display.h"
 
 #define NUM 16
 #define FAILURES 3
-
-#define AUTO      ((0x51 << 8) | 0x52) /* the command is QR */
-#define FORWARD      ((0x46 << 8) | 0x52) /* the command is FR */
-#define BACK       ((0x42 << 8) | 0x4B) /* the command is BK */
-#define LEFT      ((0x4C << 8) | 0x46) /* the command is LF */
-#define RIGHT       ((0x52 << 8) | 0x54) /* the command is RT */
-#define STOP       ((0x53 << 8) | 0x54) /* the command is ST */
-#define OK          ((0x4F << 8) | 0x4B) /* the command is OK */
-
-/* Bit definition for status register */
-#define FORWARD_Status     0
-#define BACK_Status        1
-#define LEFT_Status        2
-#define RIGHT_Status       3
-#define MOVE_Status        4
-#define AUTO_Status        6
-#define CONNOK             7
-
-/* Definition for new status register */
-#define Status_STOP         0x00 // 0b00000000
-#define Status_FORWARD      0x01 // 0b00000001 
-#define Status_BACK         0x02 // 0b00000010    
-#define Status_LEFT         0x03 // 0b00000011   
-#define Status_RIGHT        0x04 // 0b00000100     
-#define Status_SLEFT        0x05 // 0b00000101     
-#define Status_SRIGHT       0x06 // 0b00000110   
-#define Status_SBLEFT       0x07 // 0b00000111     
-#define Status_SBRIGHT      0x08 // 0b00001000 
-#define Status_OK           0x80 // 0b10000000 
-#define Status_AUTO         0x40 // 0b01000000 
 
 #define TEN(NUMBER) ((3 << 4) | NUMBER / 10)
 #define ONE(NUMBER) ((3 << 4) | NUMBER % 10)
@@ -52,16 +23,8 @@
 
 #define TIMEOUT 10
 
-#define LINE0(STR) (ST7735_PutStr5x7(5, 5, (STR), ST7735_Color565(0, 0xFF, 0), ST7735_Color565(0x0, 0x0, 0x0), 1))
-#define LINE1(STR) (ST7735_PutStr5x7(5, 15, (STR), ST7735_Color565(0, 0xFF, 0), ST7735_Color565(0x0, 0x0, 0x0), 1))
-#define LINE2(STR) (ST7735_PutStr5x7(5, 25, (STR), ST7735_Color565(0, 0xFF, 0), ST7735_Color565(0x0, 0x0, 0x0), 1))
-#define LINE3(STR) (ST7735_PutStr5x7(5, 35, (STR), ST7735_Color565(0, 0xFF, 0), ST7735_Color565(0x0, 0x0, 0x0), 1))
-#define COL1LINE0(STR)  (ST7735_PutStr5x7(80, 5, (STR), ST7735_Color565(0, 0xFF, 0), ST7735_Color565(0x0, 0x0, 0x0), 1))
-#define COL2LINE0(STR)  (ST7735_PutStr5x7(115, 5, (STR), ST7735_Color565(0, 0xFF, 0), ST7735_Color565(0x0, 0x0, 0x0), 1))
-
 #define ARRAYSIZE 3*5
 
-__IO uint8_t status = (1 << CONNOK);
 __IO uint8_t count = 0;
 __IO uint16_t sensor_data = 0xFFFF;
 
@@ -73,27 +36,52 @@ __IO uint8_t i = 0;
 __IO uint8_t j = 0;
 __IO uint8_t k = 0;
 __IO uint8_t p = 0;
-__IO uint16_t x, y, m;
+__IO uint16_t x_coord, y_coord, menu_val;
 int16_t tmp_l, tmp_r;
 __IO uint8_t drvl = 0x40;
 __IO uint8_t drvr = 0x40;
 __IO uint8_t tmp_drvl = 0;
 __IO uint8_t tmp_drvr = 0;
-__IO uint8_t tmp = 0;
 __IO uint8_t flg = 0;
 __IO uint8_t response_count = 0;
 
 void ADC1_Init(void);
-void DisplayStatus(uint8_t*);
 void TIM3_NVIC_Configuration(void);
 void TIM3_Init(void);
 void EXT_INT_Init(void);
+void KeyHandler(void);
 
 ADC_InitTypeDef ADC_InitStructure;
 DMA_InitTypeDef DMA_InitStructure;
 EXTI_InitTypeDef EXTI_InitStructure;
 
 uint16_t ADCBuffer[ARRAYSIZE];
+
+DATA_TypeDef data;
+
+void KeyHandler()
+{
+    if (menu_val < 50)
+    {
+        data.currentKey = SW_LEFT;
+    } 
+    else if (menu_val < 700)
+    {
+        data.currentKey = SW_UP;
+    }
+    else if (menu_val < 1500)
+    {
+        data.currentKey = SW_DOWN;
+    }
+    else if (menu_val < 2100)
+    {
+        data.currentKey = SW_RIGHT;
+    }
+    else if (menu_val < 3100)
+    {
+        data.currentKey = SW_OK;
+    }
+}
 
 void number2str(uint8_t byte, uint8_t *str)
 {
@@ -120,8 +108,7 @@ void USART1_IRQHandler(void)
         if (i == STOPMARKER)
         {
             response_count++;
-            status = response[0];
-            DisplayStatus(&response[0]);
+            data.currentStatus = response[0];
             p = 0;
             flg &= ~(1 << 0);
             count = 0;
@@ -142,37 +129,6 @@ void USART1_IRQHandler(void)
     }
 }
 
-
-void DisplayStatus(uint8_t *response)
-{
-    if (tmp != status)
-    {
-        tmp = status;
-        LINE0("Connected   ");
-        if (status & (1 << AUTO_Status)) LINE1("Auto ON "); else LINE1("Auto OFF");
-        if (status & (1 << MOVE_Status)) LINE2("Move ON ");
-        if (status & (1 << FORWARD_Status)) LINE3("Forward ");
-        else if (status & (1 << BACK_Status)) LINE3("Backward");
-        else if (status & (1 << LEFT_Status)) LINE3("Left    ");
-        else if (status & (1 << RIGHT_Status)) LINE3("Right   ");
-        else LINE3("        ");
-    }
-
-    if ((tmp_drvl != response[1]) || (tmp_drvr != response[2]))
-    {
-        tmp_drvl = response[1]; tmp_drvr = response[2];
-        buffer[0] = 'L'; buffer[1] = '=';
-        number2str(tmp_drvl, &buffer[2]);
-        COL1LINE0((char*)&buffer[0]);
-        buffer[0] = 'R';
-        number2str(tmp_drvr, &buffer[2]);
-        COL2LINE0((char*)&buffer[0]);
-
-        //ST7735_FillRect(80, 20, 100, 60, ST7735_Color565(0x60, 0x10, 0x50));
-        //ST7735_FillRect(115, 20, 135, 60, ST7735_Color565(0x60, 0x10, 0x50));
-    }
-}
-
 void TIM3_IRQHandler(void)
 {
     // if interrupt happens then do this
@@ -182,54 +138,45 @@ void TIM3_IRQHandler(void)
         TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
         //enable tim3 to one pulse
         //TIM_Cmd(TIM3,ENABLE);
-        y = (ADCBuffer[0] + ADCBuffer[3] + ADCBuffer[6] + ADCBuffer[9] + ADCBuffer[12]) / 5;
-        x = (ADCBuffer[1] + ADCBuffer[4] + ADCBuffer[7] + ADCBuffer[10] + ADCBuffer[13]) / 5;
-        m = (ADCBuffer[2] + ADCBuffer[5] + ADCBuffer[8] + ADCBuffer[11] + ADCBuffer[14]) / 5;
+        y_coord = (ADCBuffer[0] + ADCBuffer[3] + ADCBuffer[6] + ADCBuffer[9] + ADCBuffer[12]) / 5;
+        x_coord = (ADCBuffer[1] + ADCBuffer[4] + ADCBuffer[7] + ADCBuffer[10] + ADCBuffer[13]) / 5;
+        menu_val = (ADCBuffer[2] + ADCBuffer[5] + ADCBuffer[8] + ADCBuffer[11] + ADCBuffer[14]) / 5;
+        
+        if (menu_val < 3800) KeyHandler();
         
         count++;
 
         if (count > TIMEOUT)
         {
-            if (status != 0)
-            {
-                ST7735_Clear(ST7735_Color565(0x0, 0x0, 0x0));
-                LINE0("Disconnected");
-            }
-            status = 0; count = 0;
+            data.currentStatus = 0; count = 0;
         }
 
-        if (status & Status_AUTO)
+        if (data.currentStatus & Status_AUTO)
         {
-            status |= Status_OK;
+            data.currentStatus |= Status_OK;
             cmd[0] = STARTMARKER;
-            //cmd[3] = STOPMARKER;
-            //cmd[1] = 'O'; cmd[2] = 'K';
-            if (y > 3000) { status &= 0xF0; status |= Status_FORWARD; }
-            else if (y < 1000) { status &= 0xF0; status |= Status_BACK; }
-            else if (x > 3000) { status &= 0xF0; status |= Status_RIGHT; }
-            else if (x < 1000) { status &= 0xF0; status |= Status_LEFT; }
-            cmd[1] = status;
+            if (y_coord > 3000) { data.currentStatus &= 0xF0; data.currentStatus |= Status_FORWARD; }
+            else if (y_coord < 1000) { data.currentStatus &= 0xF0; data.currentStatus |= Status_BACK; }
+            else if (x_coord > 3000) { data.currentStatus &= 0xF0; data.currentStatus |= Status_RIGHT; }
+            else if (x_coord < 1000) { data.currentStatus &= 0xF0; data.currentStatus |= Status_LEFT; }
+            cmd[1] = data.currentStatus;
             cmd[2] = STOPMARKER;
             UARTSend(&cmd[0], 3);
-            //if (y > 3000) { cmd[1] = 'F'; cmd[2] = 'R'; UARTSend(&cmd[0], 4); }
-            //else if (y < 1000) { cmd[1] = 'B'; cmd[2] = 'K'; UARTSend(&cmd[0], 4); }
-            //else if (x > 3000) { cmd[1] = 'R'; cmd[2] = 'T'; UARTSend(&cmd[0], 4); }
-            //else if (x < 1000) { cmd[1] = 'L'; cmd[2] = 'F'; UARTSend(&cmd[0], 4); }
         }
         else
         {
             
-            tmp_l = tmp_r = y;
+            tmp_l = tmp_r = y_coord;
             
-            if (x >= MIDVAL)
+            if (x_coord >= MIDVAL)
             {
-                tmp_l = y + (x - MIDVAL);
-                tmp_r = y - (x - MIDVAL);
+                tmp_l = y_coord + (x_coord - MIDVAL);
+                tmp_r = y_coord - (x_coord - MIDVAL);
             }
-            else if (x < MIDVAL)
+            else if (x_coord < MIDVAL)
             {
-                tmp_l = y - (MIDVAL - x);
-                tmp_r = y + (MIDVAL - x);
+                tmp_l = y_coord - (MIDVAL - x_coord);
+                tmp_r = y_coord + (MIDVAL - x_coord);
             }
             if (tmp_l > MAXVAL) tmp_l = MAXVAL;
             if (tmp_r > MAXVAL) tmp_r = MAXVAL;
@@ -239,22 +186,22 @@ void TIM3_IRQHandler(void)
             drvl = tmp_l * MAXPWM / MAXVAL;
             drvr = tmp_r * MAXPWM / MAXVAL;
 
-            status &= 0xF0;
+            data.currentStatus &= 0xF0;
             cmd[0] = STARTMARKER;
-            cmd[1] = status;
-            //cmd[2] = STOPMARKER;
-            //cmd[1] = 'M'; cmd[2] = 'V';
+            cmd[1] = data.currentStatus;
             cmd[2] = drvl;
             cmd[3] = drvr;
-            cmd[4] = (uint8_t)(x & 0x00FF);
-            cmd[5] = (uint8_t)((x & 0xFF00) >> 8);
-            cmd[6] = (uint8_t)(y & 0x00FF);
-            cmd[7] = (uint8_t)((y & 0xFF00) >> 8);
-            cmd[8] = (uint8_t)(m & 0x00FF);
-            cmd[9] = (uint8_t)((m & 0xFF00) >> 8);
+            cmd[4] = (uint8_t)(x_coord & 0x00FF);
+            cmd[5] = (uint8_t)((x_coord & 0xFF00) >> 8);
+            cmd[6] = (uint8_t)(y_coord & 0x00FF);
+            cmd[7] = (uint8_t)((y_coord & 0xFF00) >> 8);
+            cmd[8] = (uint8_t)(menu_val & 0x00FF);
+            cmd[9] = (uint8_t)((menu_val & 0xFF00) >> 8);
             cmd[10] = STOPMARKER;
             UARTSend(&cmd[0], 11);
         }
+
+        ShowPage(&data);
     }
 }
 
@@ -262,26 +209,29 @@ void EXTI4_IRQHandler(void)
 {
     if (EXTI_GetITStatus(EXTI_Line4) != RESET)
     {
-        if (status & Status_AUTO)
-            status &= ~(Status_AUTO);
+        if (data.currentStatus & Status_AUTO)
+            data.currentStatus &= ~(Status_AUTO);
         else
-            status |= Status_AUTO;
+            data.currentStatus |= Status_AUTO;
         cmd[0] = STARTMARKER;
-        cmd[1] = status;
+        cmd[1] = data.currentStatus;
         cmd[2] = STOPMARKER;
-        //cmd[1] = 'Q'; cmd[2] = 'R';
-        //cmd[3] = STOPMARKER;
         UARTSend(&cmd[0], 3);
         delay_10ms(6000);
-        //
         //Clear the EXTI line 9 pending bit
-        //
         EXTI_ClearITPendingBit(EXTI_Line4);
     }
 }
 
 int main(void)
 {
+    
+    data.currentPage = DISPLAY_status;
+    data.prevKey = SW_NONE;
+    data.currentKey = SW_NONE;
+    data.prevStatus = 0xFF;
+    data.currentStatus = 0;
+    data.keyPressed = FALSE;
 
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2 | RCC_APB1Periph_TIM3, ENABLE);
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_USART1
@@ -295,16 +245,15 @@ int main(void)
     ST7735_Init();
     ST7735_Orientation(1);
     ST7735_Clear(ST7735_Color565(0x0, 0x0, 0x0));
-    LINE0("Remote control");
-
+    
     USART_NVIC_Configuration();
     USART_GPIO_Configuration();
     USART_Configuration();
     USART_ITConfig(USART1, USART_IT_RXNE, ENABLE);
-
+    
     TIM3_NVIC_Configuration();
     TIM3_Init();
-
+    
     while (1)
     {
         ;
@@ -364,7 +313,7 @@ void ADC1_Init(void)
     // input of ADC (it doesn't seem to be needed, as default GPIO state is floating input)
     GPIO_InitTypeDef GPIO_InitStructure;
     GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_AIN;
-    GPIO_InitStructure.GPIO_Pin   = GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_5;        // that's ADC12_IN2, ADC12_IN3 and ADC12_IN5 (PA2, PA3, PA5 on STM32)
+    GPIO_InitStructure.GPIO_Pin   = GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_6;        // that's ADC12_IN2, ADC12_IN3 and ADC12_IN6 (PA2, PA3, PA6 on STM32)
     GPIO_Init(GPIOA, &GPIO_InitStructure);
 
     RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
@@ -398,7 +347,7 @@ void ADC1_Init(void)
 
     ADC_RegularChannelConfig(ADC1, ADC_Channel_2, 1, ADC_SampleTime_28Cycles5);
     ADC_RegularChannelConfig(ADC1, ADC_Channel_3, 2, ADC_SampleTime_28Cycles5);
-    ADC_RegularChannelConfig(ADC1, ADC_Channel_5, 3, ADC_SampleTime_28Cycles5);
+    ADC_RegularChannelConfig(ADC1, ADC_Channel_6, 3, ADC_SampleTime_28Cycles5);
     ADC_Init (ADC1, &ADC_InitStructure);
 
     // enable ADC
