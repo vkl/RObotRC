@@ -108,7 +108,7 @@ void USART1_IRQHandler(void)
         if (i == STOPMARKER)
         {
             response_count++;
-            data.currentStatus = response[0];
+            data.responseStatus = response[0];
             p = 0;
             flg &= ~(1 << 0);
             count = 0;
@@ -138,30 +138,68 @@ void TIM3_IRQHandler(void)
         TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
         //enable tim3 to one pulse
         //TIM_Cmd(TIM3,ENABLE);
+        
+        data.currentStatus |= Status_OK;
+        
         y_coord = (ADCBuffer[0] + ADCBuffer[3] + ADCBuffer[6] + ADCBuffer[9] + ADCBuffer[12]) / 5;
         x_coord = (ADCBuffer[1] + ADCBuffer[4] + ADCBuffer[7] + ADCBuffer[10] + ADCBuffer[13]) / 5;
         menu_val = (ADCBuffer[2] + ADCBuffer[5] + ADCBuffer[8] + ADCBuffer[11] + ADCBuffer[14]) / 5;
         
-        if (menu_val < 3800) KeyHandler();
+        if (menu_val < 3800) 
+        {
+            if (data.keyPressed == FALSE)
+            {
+                data.keyPressed = TRUE;
+                KeyHandler();
+            }
+        }
+        else
+        {
+            data.keyPressed = FALSE;
+        }
         
         count++;
 
         if (count > TIMEOUT)
         {
-            data.currentStatus = 0; count = 0;
+            data.responseStatus = 0; count = 0;
         }
 
         if (data.currentStatus & Status_AUTO)
         {
-            data.currentStatus |= Status_OK;
-            cmd[0] = STARTMARKER;
-            if (y_coord > 3000) { data.currentStatus &= 0xF0; data.currentStatus |= Status_FORWARD; }
-            else if (y_coord < 1000) { data.currentStatus &= 0xF0; data.currentStatus |= Status_BACK; }
-            else if (x_coord > 3000) { data.currentStatus &= 0xF0; data.currentStatus |= Status_RIGHT; }
-            else if (x_coord < 1000) { data.currentStatus &= 0xF0; data.currentStatus |= Status_LEFT; }
+            if ((y_coord > 3000) && ((x_coord > 1900) && (x_coord < 2100))) 
+            { 
+                data.currentStatus &= 0xF0; data.currentStatus |= Status_FORWARD; 
+            }
+            else if ((y_coord < 1000) && ((x_coord > 1900) && (x_coord < 2100))) 
+            { 
+                data.currentStatus &= 0xF0; data.currentStatus |= Status_BACK; 
+            }
+            else if ((x_coord > 3000)  && ((y_coord > 1900) && (y_coord < 2100))) 
+            { 
+                data.currentStatus &= 0xF0; data.currentStatus |= Status_RIGHT;
+            }
+            else if ((x_coord < 1000)  && ((y_coord > 1900) && (y_coord < 2100))) 
+            { 
+                data.currentStatus &= 0xF0; data.currentStatus |= Status_LEFT;
+            }
+            else if ((x_coord > 4000)  && (y_coord > 4000)) 
+            { 
+                data.currentStatus &= 0xF0; data.currentStatus |= Status_SRIGHT;
+            }
+            else if ((x_coord < 50)  && (y_coord < 50)) 
+            { 
+                data.currentStatus &= 0xF0; data.currentStatus |= Status_SBLEFT;
+            }
+            else if ((x_coord < 50)  && (y_coord > 4000)) 
+            { 
+                data.currentStatus &= 0xF0; data.currentStatus |= Status_SLEFT;
+            }
+            else if ((x_coord > 4000)  && (y_coord < 50)) 
+            { 
+                data.currentStatus &= 0xF0; data.currentStatus |= Status_SBRIGHT;
+            }
             cmd[1] = data.currentStatus;
-            cmd[2] = STOPMARKER;
-            UARTSend(&cmd[0], 3);
         }
         else
         {
@@ -187,19 +225,15 @@ void TIM3_IRQHandler(void)
             drvr = tmp_r * MAXPWM / MAXVAL;
 
             data.currentStatus &= 0xF0;
-            cmd[0] = STARTMARKER;
-            cmd[1] = data.currentStatus;
-            cmd[2] = drvl;
-            cmd[3] = drvr;
-            cmd[4] = (uint8_t)(x_coord & 0x00FF);
-            cmd[5] = (uint8_t)((x_coord & 0xFF00) >> 8);
-            cmd[6] = (uint8_t)(y_coord & 0x00FF);
-            cmd[7] = (uint8_t)((y_coord & 0xFF00) >> 8);
-            cmd[8] = (uint8_t)(menu_val & 0x00FF);
-            cmd[9] = (uint8_t)((menu_val & 0xFF00) >> 8);
-            cmd[10] = STOPMARKER;
-            UARTSend(&cmd[0], 11);
+            
         }
+        
+        cmd[0] = STARTMARKER;
+        cmd[1] = data.currentStatus;
+        cmd[2] = drvl;
+        cmd[3] = drvr;
+        cmd[4] = STOPMARKER;
+        UARTSend(&cmd[0], 5);
 
         ShowPage(&data);
     }
@@ -213,10 +247,6 @@ void EXTI4_IRQHandler(void)
             data.currentStatus &= ~(Status_AUTO);
         else
             data.currentStatus |= Status_AUTO;
-        cmd[0] = STARTMARKER;
-        cmd[1] = data.currentStatus;
-        cmd[2] = STOPMARKER;
-        UARTSend(&cmd[0], 3);
         delay_10ms(6000);
         //Clear the EXTI line 9 pending bit
         EXTI_ClearITPendingBit(EXTI_Line4);
@@ -226,11 +256,14 @@ void EXTI4_IRQHandler(void)
 int main(void)
 {
     
+    InitMenu();
+    
     data.currentPage = DISPLAY_status;
     data.prevKey = SW_NONE;
     data.currentKey = SW_NONE;
     data.prevStatus = 0xFF;
     data.currentStatus = 0;
+    data.responseStatus = 0;
     data.keyPressed = FALSE;
 
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2 | RCC_APB1Periph_TIM3, ENABLE);
